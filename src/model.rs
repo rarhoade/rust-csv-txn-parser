@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct TxEvent {
     #[serde(rename = "type")]
     pub kind: TxKindRaw,
-    pub client: u16,
-    pub tx: u32,
+    pub client: ClientId,
+    pub tx: TxId,
     pub amount: Option<Decimal>
 }
 
@@ -85,7 +85,7 @@ impl Account {
 
 #[derive(Debug, Clone)]
 pub struct TxRecord {
-    client:  u16,
+    client:  ClientId,
     amount:  Decimal,
     disputed: bool,
     dispute_finished: bool,
@@ -93,7 +93,7 @@ pub struct TxRecord {
 }
 
 impl TxRecord {
-    pub fn new(client: u16, amount: Decimal, disputed: bool, kind: RecordKind) -> TxRecord {
+    pub fn new(client: ClientId, amount: Decimal, disputed: bool, kind: RecordKind) -> TxRecord {
         TxRecord {
             client,
             amount,
@@ -102,7 +102,7 @@ impl TxRecord {
             kind,
         }
     }
-    pub fn client(&self) -> u16 { self.client }
+    pub fn client(&self) -> ClientId { self.client }
     pub fn amount(&self) -> Decimal { self.amount }
     pub fn disputed(&self) -> bool { self.disputed }
     pub fn dispute_finished(&self) -> bool { self.dispute_finished }
@@ -127,6 +127,9 @@ pub enum RecordKind {
     Withdrawal
 }
 
+pub type ClientId = u16;
+pub type TxId = u32;
+
 #[cfg(test)]
 mod test_account {
     use rust_decimal::dec;
@@ -137,7 +140,7 @@ mod test_account {
         let account = Account::new();
         assert_eq!(account.available, dec!(0));
         assert_eq!(account.held, dec!(0));
-        assert_eq!(account.locked, false);
+        assert!(!account.locked);
     }
 
     #[test]
@@ -166,9 +169,9 @@ mod test_account {
     fn test_lock_unlock() {
         let mut account = Account::new();
         account.lock();
-        assert_eq!(account.locked, true);
+        assert!(account.locked);
         account.unlock();
-        assert_eq!(account.locked, false);
+        assert!(!account.locked);
     }
 
     #[test]
@@ -201,8 +204,8 @@ mod test_tx_record {
         assert_eq!(record.amount(), dec!(1));
         assert_eq!(record.client(), 1);
         assert_eq!(record.kind(), RecordKind::Withdrawal);
-        assert_eq!(record.dispute_finished(), false);
-        assert_eq!(record.disputed(), false);
+        assert!(!record.dispute_finished());
+        assert!(!record.disputed());
     }
 
     #[test]
@@ -214,8 +217,8 @@ mod test_tx_record {
             RecordKind::Withdrawal
         );
         record.modify_disputed(true);
-        assert_eq!(record.disputed(), true);
+        assert!(record.disputed());
         record.finish_dispute();
-        assert_eq!(record.dispute_finished(), true);
+        assert!(record.dispute_finished());
     }
 }

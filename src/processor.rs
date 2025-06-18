@@ -1,11 +1,14 @@
 use std::error::Error;
+use std::ffi::OsString;
+use std::fs::File;
 use dashmap::{DashMap, Entry};
 use rust_decimal::dec;
-use crate::model::{Account, RecordKind, TxEvent, TxKindRaw, TxRecord};
+use crate::model::{Account, ClientId, RecordKind, TxEvent, TxId, TxKindRaw, TxRecord};
+use crate::processor;
 
 pub struct Processor {
-    accounts: DashMap<u16, Account>,
-    tx_history: DashMap<u32, TxRecord>
+    accounts: DashMap<ClientId, Account>,
+    tx_history: DashMap<TxId, TxRecord>
 }
 
 impl Processor {
@@ -15,8 +18,20 @@ impl Processor {
             tx_history: DashMap::new()
         }
     }
-    pub fn accounts(&self) -> DashMap<u16, Account> { self.accounts.clone() }
-    pub fn tx_history(&self) -> DashMap<u32, TxRecord> { self.tx_history.clone() }
+    pub fn process_file(file_path: OsString) -> Result<Processor, Box<dyn Error>> {
+        let file = File::open(file_path)?;
+        let mut rdr = csv::ReaderBuilder::new()
+            .trim(csv::Trim::All)
+            .from_reader(file);
+        let mut processor = processor::Processor::default();
+        for record in rdr.records() {
+            let ev: TxEvent = record?.deserialize(None)?;
+            processor.process(ev)?;
+        }
+        Ok(processor)
+    }
+    pub fn accounts(&self) -> &DashMap<ClientId, Account> { &self.accounts }
+    pub fn tx_history(&self) -> &DashMap<TxId, TxRecord> { &self.tx_history }
     pub fn process(&mut self, ev: TxEvent) -> Result<(), Box<dyn Error>>{
         match ev.kind {
             TxKindRaw::Deposit => self.deposit(ev)?,
@@ -142,5 +157,120 @@ impl Processor {
         }
         Ok(())
     }
+}
 
+#[cfg(test)]
+mod process_file_tests {
+    use std::ffi::OsString;
+    use rust_decimal::dec;
+    use crate::Processor;
+
+    #[test]
+    fn run_simple_deposit_csv() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.accounts().get(&1).unwrap().available(), dec!(1.5));
+        assert_eq!(result.accounts().get(&2).unwrap().available(), dec!(2));
+    }
+
+    #[test]
+    fn run_test_locked() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_locked.csv"));
+        assert!(!result.is_err());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(0.5));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(0.5));
+        assert!(client_one.locked());
+    }
+
+
+    #[test]
+    fn run_test_early_locked() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_data_early_lock.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(2.0));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(2.0));
+        assert!(client_one.locked());
+    }
+
+    #[test]
+    fn run_test_dispute_resolve() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_data_dispute_resolve.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(1.5));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(1.5));
+        assert!(!client_one.locked());
+    }
+
+    #[test]
+    fn run_test_over_withdrawal() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_over_withdrawal.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(3.0));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(3.0));
+        assert!(!client_one.locked());
+    }
+
+    #[test]
+    fn run_test_dispute_withdrawal() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_dispute_withdrawal.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(3.0));
+        assert_eq!(client_one.held(), dec!(-1.5));
+        assert_eq!(client_one.total(), dec!(1.5));
+        assert!(!client_one.locked());
+    }
+
+    #[test]
+    fn run_test_dispute_withdrawal_resolve() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_dispute_withdrawal_resolve.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(1.500));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(1.500));
+        assert!(!client_one.locked());
+    }
+
+
+    #[test]
+    fn run_test_dispute_withdrawal_chargeback() {
+        let result = Processor::process_file(OsString::from("src/test_csv_data/test_dispute_withdrawal_chargeback.csv"));
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        let client_one = result.accounts().get(&1);
+        assert!(client_one.is_some());
+        let client_one = client_one.unwrap().clone();
+        assert_eq!(client_one.available(), dec!(4));
+        assert_eq!(client_one.held(), dec!(0));
+        assert_eq!(client_one.total(), dec!(4));
+        assert!(client_one.locked());
+    }
 }
