@@ -60,7 +60,6 @@ impl Account {
             RecordKind::Withdrawal => {
                 self.available -= val;
                 self.held += val
-
             }
         }
     }
@@ -88,7 +87,7 @@ pub struct TxRecord {
     client:  ClientId,
     amount:  Decimal,
     disputed: bool,
-    dispute_finished: bool,
+    charged_back: bool,
     kind:    RecordKind, // Deposit | Withdrawal
 }
 
@@ -98,17 +97,17 @@ impl TxRecord {
             client,
             amount,
             disputed,
-            dispute_finished: false,
+            charged_back: false,
             kind,
         }
     }
-    pub fn client(&self) -> ClientId { self.client }
-    pub fn amount(&self) -> Decimal { self.amount }
-    pub fn disputed(&self) -> bool { self.disputed }
-    pub fn dispute_finished(&self) -> bool { self.dispute_finished }
-    pub fn kind(&self) -> RecordKind { self.kind.clone() }
+    pub fn client(&self) -> &ClientId { &self.client }
+    pub fn amount(&self) -> &Decimal { &self.amount }
+    pub fn disputed(&self) -> &bool { &self.disputed }
+    pub fn charged_back(&self) -> &bool { &self.charged_back }
+    pub fn kind(&self) -> &RecordKind { &self.kind }
     pub fn modify_disputed(&mut self, val: bool) { self.disputed = val }
-    pub fn finish_dispute(&mut self) { self.dispute_finished = true  }
+    pub fn finish_chargeback(&mut self) { self.charged_back = true  }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -201,10 +200,10 @@ mod test_tx_record {
             RecordKind::Withdrawal
         );
 
-        assert_eq!(record.amount(), dec!(1));
-        assert_eq!(record.client(), 1);
-        assert_eq!(record.kind(), RecordKind::Withdrawal);
-        assert!(!record.dispute_finished());
+        assert_eq!(record.amount().clone(), dec!(1));
+        assert_eq!(record.client().clone(), 1);
+        assert_eq!(record.kind(), &RecordKind::Withdrawal);
+        assert!(!record.charged_back());
         assert!(!record.disputed());
     }
 
@@ -218,7 +217,7 @@ mod test_tx_record {
         );
         record.modify_disputed(true);
         assert!(record.disputed());
-        record.finish_dispute();
-        assert!(record.dispute_finished());
+        record.finish_chargeback();
+        assert!(record.charged_back());
     }
 }
