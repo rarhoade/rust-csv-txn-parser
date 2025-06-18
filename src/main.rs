@@ -12,18 +12,18 @@ fn main() {
             match Processor::process_file(file_path) {
                 Ok(processor) => {
                     if let Err(err) = print_account_data(processor) {
-                        println!("{}", err);
+                        eprintln!("{}", err);
                         process::exit(1);
                     }
                 }
                 Err(err) => {
-                    println!("{}", err);
+                    eprintln!("{}", err);
                     process::exit(1);
                 }
             }
         }
         Err(err) => {
-            println!("{}", err);
+            eprintln!("{}", err);
             process::exit(1);
         }
     }
