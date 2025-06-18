@@ -2,6 +2,7 @@ use std::{env};
 use std::error::Error;
 use std::ffi::OsString;
 use std::io::{stdout, Write};
+use std::sync::Arc;
 use crate::processor::Processor;
 
 pub fn get_first_arg() -> Result<OsString, Box<dyn Error>> {
@@ -11,7 +12,7 @@ pub fn get_first_arg() -> Result<OsString, Box<dyn Error>> {
     }
 }
 
-pub fn print_account_data(processor: Processor) -> Result<(), Box<dyn Error>>{
+pub fn print_account_data(processor: Arc<Processor>) -> Result<(), Box<dyn Error>>{
     let mut lock = stdout().lock();
     writeln!(lock, "client, available, held, total, locked")?;
     for account_data in processor.accounts() {

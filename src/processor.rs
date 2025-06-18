@@ -1,10 +1,13 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs::File;
+use std::sync::Arc;
+use crossbeam_channel::{bounded, Sender};
 use dashmap::{DashMap, Entry};
 use rust_decimal::dec;
+use threadpool::ThreadPool;
 use crate::model::{Account, ClientId, RecordKind, TxEvent, TxId, TxKindRaw, TxRecord};
-use crate::processor;
 
 pub struct Processor {
     accounts: DashMap<ClientId, Account>,
@@ -18,16 +21,33 @@ impl Processor {
             tx_history: DashMap::new()
         }
     }
-    pub fn process_file(file_path: OsString) -> Result<Processor, Box<dyn Error>> {
+    pub fn process_file(file_path: OsString) -> Result<Arc<Processor>, Box<dyn Error>> {
+        let num_workers = num_cpus::get();
+        let pool = ThreadPool::new(num_workers);
         let file = File::open(file_path)?;
         let mut rdr = csv::ReaderBuilder::new()
             .trim(csv::Trim::All)
             .from_reader(file);
-        let processor = processor::Processor::default();
-        for record in rdr.records() {
-            let ev: TxEvent = record?.deserialize(None)?;
-            processor.process(ev)?;
+        let processor = Arc::new(Processor::default());
+        let mut senders: HashMap<ClientId, Sender<TxEvent>> = HashMap::new();
+        for result in rdr.records() {
+            let tx: TxEvent = result?.deserialize(None)?;
+            let sender = senders.entry(tx.client.clone()).or_insert_with(|| {
+                let (s, r) = bounded::<TxEvent>(1000);
+                let proc_clone = Arc::clone(&processor);
+                pool.execute(move || {
+                    for ev in r.iter() {
+                        if let Err(e) = proc_clone.process(ev.clone()) {
+                            eprintln!("Error processing tx {} for client {}: {}", ev.tx, ev.client, e);
+                        }
+                    }
+                });
+                s
+            });
+            sender.send(tx)?;
         }
+        drop(senders);
+        pool.join();
         Ok(processor)
     }
     pub fn accounts(&self) -> &DashMap<ClientId, Account> { &self.accounts }

@@ -1,7 +1,7 @@
 use rust_decimal::{dec, Decimal};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxEvent {
     #[serde(rename = "type")]
     pub kind: TxKindRaw,
@@ -110,7 +110,7 @@ impl TxRecord {
     pub fn finish_chargeback(&mut self) { self.charged_back = true  }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all(deserialize="lowercase"))]
 pub enum TxKindRaw {
     Deposit,
